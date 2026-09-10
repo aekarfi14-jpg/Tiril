@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -24,23 +24,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.2
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug --no-daemon
 
-      - name: Verify APK exists
+      - name: Verify APK
         run: |
-          echo "===== APK files ====="
+          echo "=== APK OUTPUT ==="
           find android/app/build/outputs/apk -type f -name "*.apk" -print
-          test -n "$(find android/app/build/outputs/apk -type f -name '*.apk' -print -quit)"
+          test -f android/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload APK
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Tiril.apk
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Tiril-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: Tiril.apk
           if-no-files-found: error
           retention-days: 30
