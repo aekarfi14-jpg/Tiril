@@ -11,9 +11,22 @@ import {
   GameStateBroadcast,
   Player,
 } from '../types';
-import { MAP_WIDTH, MAP_HEIGHT, MAP_WALLS, TEAM_SPAWNS, NEUTRAL_SPAWNS, INITIAL_CRATES, WallObstacle } from './mapData';
+import {
+  MAP_WIDTH,
+  MAP_HEIGHT,
+  MAP_PLATFORMS,
+  TEAM_SPAWNS,
+  NEUTRAL_SPAWNS,
+  INITIAL_CRATES,
+  PlatformObstacle,
+} from './mapData';
 import { CHARACTERS } from '../i18n/translations';
 import { audioService } from '../services/audioService';
+
+const GRAVITY = 1380; // px/s²
+const JUMP_IMPULSE = -680; // px/s
+const PLAYER_HALF_WIDTH = 18;
+const PLAYER_HALF_HEIGHT = 34;
 
 export class GameEngine {
   private phase: 'lobby' | 'countdown' | 'playing' | 'ended' = 'lobby';
@@ -33,9 +46,12 @@ export class GameEngine {
   };
   private winnerTeam: TeamColor | null = null;
 
+  // Jump tracking
+  private jumpCounts: Map<string, number> = new Map();
   // Weapon fire rate cooldown trackers
   private weaponCooldowns: Map<string, number> = new Map();
   private grenadeCooldowns: Map<string, number> = new Map();
+  private shootAnimTimers: Map<string, number> = new Map();
 
   constructor() {
     this.resetCrates();
@@ -64,12 +80,15 @@ export class GameEngine {
     this.grenades = [];
     this.explosions = [];
     this.killFeed = [];
+    this.jumpCounts.clear();
+    this.weaponCooldowns.clear();
+    this.grenadeCooldowns.clear();
+    this.shootAnimTimers.clear();
     this.resetCrates();
     this.players.clear();
 
     lobbyPlayers.forEach((lp, idx) => {
       const spawn = this.getSafeSpawn(lp.team);
-      const charMeta = CHARACTERS.find((c) => c.id === lp.characterId) || CHARACTERS[0];
       const playerState: GamePlayerState = {
         id: lp.id,
         name: lp.name,
@@ -90,9 +109,14 @@ export class GameEngine {
         score: 0,
         isJumping: false,
         jumpHeight: 0,
+        facingRight: true,
+        isOnGround: true,
+        walkCycle: 0,
+        isShooting: false,
         number: idx + 1,
       };
       this.players.set(lp.id, playerState);
+      this.jumpCounts.set(lp.id, 0);
     });
 
     audioService.playMatchStart();
@@ -121,36 +145,51 @@ export class GameEngine {
 
     // Movement velocity based on character speed
     const charMeta = CHARACTERS.find((c) => c.id === player.characterId) || CHARACTERS[0];
-    const speed = charMeta.speed;
+    const speed = charMeta.speed * 1.35;
 
-    // Normalize diagonal movement
-    let moveX = input.moveX;
-    let moveY = input.moveY;
-    const len = Math.hypot(moveX, moveY);
-    if (len > 1) {
-      moveX /= len;
-      moveY /= len;
+    // Horizontal movement in 2D platformer
+    player.vx = input.moveX * speed;
+
+    // Aim Angle & Facing Direction
+    player.aimAngle = input.aimAngle;
+    const cosAim = Math.cos(input.aimAngle);
+    if (Math.abs(input.moveX) > 0.15) {
+      player.facingRight = input.moveX > 0;
+    } else if (Math.abs(cosAim) > 0.1) {
+      player.facingRight = cosAim > 0;
     }
 
-    player.vx = moveX * speed;
-    player.vy = moveY * speed;
-    player.aimAngle = input.aimAngle;
     player.weapon = input.weapon;
 
-    // Jump trigger
+    // Jump Logic (Supports initial jump + 1 double jump)
     if (input.isJumping && !player.isJumping) {
       player.isJumping = true;
-      player.jumpHeight = 1;
+      const currentJumps = this.jumpCounts.get(player.id) || 0;
+
+      if (player.isOnGround) {
+        player.vy = JUMP_IMPULSE;
+        player.isOnGround = false;
+        this.jumpCounts.set(player.id, 1);
+        audioService.playButtonClick();
+      } else if (currentJumps < 2) {
+        // Double jump in mid-air
+        player.vy = JUMP_IMPULSE * 0.9;
+        this.jumpCounts.set(player.id, 2);
+        audioService.playButtonClick();
+        this.spawnExplosion(player.x, player.y + PLAYER_HALF_HEIGHT, 20, '#38bdf8');
+      }
     }
 
     // Weapons firing
     const now = Date.now();
     if (input.isFiring) {
       const lastFire = this.weaponCooldowns.get(player.id) || 0;
-      const cooldown = player.weapon === 'shotgun' ? 700 : 160;
+      const cooldown = player.weapon === 'shotgun' ? 680 : 150;
 
       if (now - lastFire >= cooldown) {
         this.weaponCooldowns.set(player.id, now);
+        this.shootAnimTimers.set(player.id, now + 120);
+        player.isShooting = true;
         this.spawnWeaponFire(player);
       }
     }
@@ -166,19 +205,20 @@ export class GameEngine {
   }
 
   private spawnWeaponFire(player: GamePlayerState) {
-    const muzzleOffset = 24;
-    const startX = player.x + Math.cos(player.aimAngle) * muzzleOffset;
-    const startY = player.y + Math.sin(player.aimAngle) * muzzleOffset;
+    // Shoulder position
+    const shoulderY = player.y - 12;
+    const barrelLen = 32;
+    const startX = player.x + Math.cos(player.aimAngle) * barrelLen;
+    const startY = shoulderY + Math.sin(player.aimAngle) * barrelLen;
 
     if (player.weapon === 'shotgun') {
       audioService.playShotgun();
-      // 5 pellets spread in cone
       const pellets = 5;
-      const spreadAngle = 0.36; // ~20 degrees total
+      const spreadAngle = 0.35;
       for (let i = 0; i < pellets; i++) {
-        const offset = (i / (pellets - 1) - 0.5) * spreadAngle + (Math.random() - 0.5) * 0.05;
+        const offset = (i / (pellets - 1) - 0.5) * spreadAngle + (Math.random() - 0.5) * 0.06;
         const angle = player.aimAngle + offset;
-        const speed = 720 + Math.random() * 80;
+        const speed = 920 + Math.random() * 120;
 
         this.projectiles.push({
           id: `proj_${Date.now()}_${Math.random()}`,
@@ -188,18 +228,18 @@ export class GameEngine {
           y: startY,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed,
-          radius: 3.5,
-          damage: 15,
+          radius: 4,
+          damage: 16,
           weapon: 'shotgun',
-          life: 0.35, // short lifespan for shotgun
+          life: 0.45,
         });
       }
     } else {
       // Assault Rifle
       audioService.playRifle();
-      const spread = (Math.random() - 0.5) * 0.08;
+      const spread = (Math.random() - 0.5) * 0.06;
       const angle = player.aimAngle + spread;
-      const speed = 880;
+      const speed = 1100;
 
       this.projectiles.push({
         id: `proj_${Date.now()}_${Math.random()}`,
@@ -209,10 +249,10 @@ export class GameEngine {
         y: startY,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        radius: 3,
-        damage: 13,
+        radius: 3.5,
+        damage: 14,
         weapon: 'rifle',
-        life: 0.9,
+        life: 1.1,
       });
     }
   }
@@ -220,9 +260,10 @@ export class GameEngine {
   private spawnGrenade(player: GamePlayerState, power: number) {
     audioService.playGrenadeThrow();
     const clampedPower = Math.max(0.3, Math.min(1.0, power));
-    const speed = 250 + clampedPower * 420;
-    const startX = player.x + Math.cos(player.aimAngle) * 20;
-    const startY = player.y + Math.sin(player.aimAngle) * 20;
+    const speed = 320 + clampedPower * 560;
+    const shoulderY = player.y - 12;
+    const startX = player.x + Math.cos(player.aimAngle) * 24;
+    const startY = shoulderY + Math.sin(player.aimAngle) * 24;
 
     this.grenades.push({
       id: `grenade_${Date.now()}_${Math.random()}`,
@@ -231,10 +272,10 @@ export class GameEngine {
       x: startX,
       y: startY,
       vx: Math.cos(player.aimAngle) * speed,
-      vy: Math.sin(player.aimAngle) * speed,
-      fuseTime: 1.8,
-      radius: 6,
-      maxDistance: speed * 1.8,
+      vy: Math.sin(player.aimAngle) * speed - 160, // slight upward arc
+      fuseTime: 2.0,
+      radius: 7,
+      maxDistance: speed * 2.0,
     });
   }
 
@@ -249,7 +290,9 @@ export class GameEngine {
       return;
     }
 
-    // 1. Update Players
+    const now = Date.now();
+
+    // 1. Update Players with Gravity & Platform Collisions
     this.players.forEach((player) => {
       if (!player.isAlive) {
         player.respawnTimeRemaining -= dt;
@@ -259,58 +302,141 @@ export class GameEngine {
         return;
       }
 
-      // Jump Physics
-      if (player.isJumping) {
-        player.jumpHeight += 180 * dt;
-        if (player.jumpHeight > 24) {
-          player.jumpHeight = 0;
-          player.isJumping = false;
+      // Check shoot animation expire
+      const shootTimer = this.shootAnimTimers.get(player.id) || 0;
+      player.isShooting = now < shootTimer;
+
+      // Apply Gravity
+      player.vy += GRAVITY * dt;
+
+      // Horizontal Walk Cycle
+      if (Math.abs(player.vx) > 10) {
+        player.walkCycle += Math.abs(player.vx) * dt * 0.05;
+      } else {
+        player.walkCycle = 0;
+      }
+
+      // Desired Next Position
+      const prevY = player.y;
+      const nextX = player.x + player.vx * dt;
+      let nextY = player.y + player.vy * dt;
+
+      // Check Horizontal Bounds & Solid Walls
+      const clampedX = Math.max(
+        60 + PLAYER_HALF_WIDTH,
+        Math.min(MAP_WIDTH - 60 - PLAYER_HALF_WIDTH, nextX)
+      );
+      if (!this.checkSolidCollision(clampedX, player.y)) {
+        player.x = clampedX;
+      } else {
+        player.vx = 0;
+      }
+
+      // Platform Collisions (Vertical)
+      let landed = false;
+      const feetY = nextY + PLAYER_HALF_HEIGHT;
+      const prevFeetY = prevY + PLAYER_HALF_HEIGHT;
+
+      // 1. Ground and Platforms
+      for (const plat of MAP_PLATFORMS) {
+        const left = plat.x;
+        const right = plat.x + plat.width;
+        const top = plat.y;
+        const bottom = plat.y + plat.height;
+
+        // Check horizontal overlap
+        if (player.x + PLAYER_HALF_WIDTH > left && player.x - PLAYER_HALF_WIDTH < right) {
+          if (plat.isJumpThrough) {
+            // Can only land when falling down through top
+            if (player.vy >= 0 && prevFeetY <= top + 10 && feetY >= top) {
+              nextY = top - PLAYER_HALF_HEIGHT;
+              player.vy = 0;
+              landed = true;
+              break;
+            }
+          } else {
+            // Solid platform (floor/boundary)
+            if (player.vy >= 0 && prevFeetY <= top + 14 && feetY >= top) {
+              nextY = top - PLAYER_HALF_HEIGHT;
+              player.vy = 0;
+              landed = true;
+              break;
+            } else if (player.vy < 0 && player.y - PLAYER_HALF_HEIGHT <= bottom && prevY - PLAYER_HALF_HEIGHT >= bottom - 10) {
+              // Hit ceiling
+              nextY = bottom + PLAYER_HALF_HEIGHT;
+              player.vy = 0;
+              break;
+            }
+          }
         }
       }
 
-      // Movement & Wall Collision
-      const nextX = player.x + player.vx * dt;
-      const nextY = player.y + player.vy * dt;
-      const playerRadius = 18;
-
-      // X-axis check
-      if (!this.checkWallCollision(nextX, player.y, playerRadius)) {
-        player.x = Math.max(playerRadius + 40, Math.min(MAP_WIDTH - playerRadius - 40, nextX));
-      }
-      // Y-axis check
-      if (!this.checkWallCollision(player.x, nextY, playerRadius)) {
-        player.y = Math.max(playerRadius + 40, Math.min(MAP_HEIGHT - playerRadius - 40, nextY));
-      }
-
-      // Push Crates
+      // 2. Stand on or Push Crates
       this.crates.forEach((crate) => {
         if (crate.broken) return;
-        const dx = player.x - (crate.x + crate.width / 2);
-        const dy = player.y - (crate.y + crate.height / 2);
-        const dist = Math.hypot(dx, dy);
-        const minDistance = playerRadius + crate.width / 2;
 
-        if (dist < minDistance && dist > 0.001) {
-          // Push crate lightly
-          const pushAngle = Math.atan2(dy, dx) + Math.PI;
-          crate.vx += Math.cos(pushAngle) * 70;
-          crate.vy += Math.sin(pushAngle) * 70;
+        const crateLeft = crate.x;
+        const crateRight = crate.x + crate.width;
+        const crateTop = crate.y;
+        const crateBottom = crate.y + crate.height;
+
+        // Standing on top of crate
+        if (player.x + PLAYER_HALF_WIDTH > crateLeft && player.x - PLAYER_HALF_WIDTH < crateRight) {
+          if (player.vy >= 0 && prevFeetY <= crateTop + 14 && feetY >= crateTop) {
+            nextY = crateTop - PLAYER_HALF_HEIGHT;
+            player.vy = 0;
+            landed = true;
+          }
+        }
+
+        // Pushing crate sideways
+        const playerTop = player.y - PLAYER_HALF_HEIGHT;
+        const playerBottom = player.y + PLAYER_HALF_HEIGHT;
+        if (playerBottom > crateTop + 10 && playerTop < crateBottom - 10) {
+          const dx = player.x - (crate.x + crate.width / 2);
+          if (Math.abs(dx) < PLAYER_HALF_WIDTH + crate.width / 2 + 4) {
+            if (dx < 0 && player.vx > 0) {
+              crate.vx = player.vx * 0.7;
+            } else if (dx > 0 && player.vx < 0) {
+              crate.vx = player.vx * 0.7;
+            }
+          }
         }
       });
+
+      player.y = nextY;
+      player.isOnGround = landed;
+      if (landed) {
+        this.jumpCounts.set(player.id, 0);
+        player.isJumping = false;
+      }
     });
 
-    // 2. Update Crates Movement & Friction
+    // 2. Update Crates Movement, Gravity & Platform Floor Collision
     this.crates.forEach((crate) => {
       if (crate.broken) return;
+
+      crate.vy += GRAVITY * dt;
       crate.x += crate.vx * dt;
       crate.y += crate.vy * dt;
+
       // Friction
       crate.vx *= 0.88;
-      crate.vy *= 0.88;
+
+      // Floor / Platform collision for crate
+      const crateBottom = crate.y + crate.height;
+      for (const plat of MAP_PLATFORMS) {
+        if (crate.x + crate.width > plat.x && crate.x < plat.x + plat.width) {
+          if (crate.vy >= 0 && crateBottom >= plat.y && crateBottom - crate.vy * dt <= plat.y + 16) {
+            crate.y = plat.y - crate.height;
+            crate.vy = 0;
+            break;
+          }
+        }
+      }
 
       // Clamp within map bounds
-      crate.x = Math.max(50, Math.min(MAP_WIDTH - crate.width - 50, crate.x));
-      crate.y = Math.max(50, Math.min(MAP_HEIGHT - crate.height - 50, crate.y));
+      crate.x = Math.max(65, Math.min(MAP_WIDTH - crate.width - 65, crate.x));
     });
 
     // 3. Update Projectiles
@@ -321,9 +447,19 @@ export class GameEngine {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
 
-      // Check boundary & wall hits
-      if (this.checkWallCollision(p.x, p.y, p.radius)) {
-        return false;
+      // Check platform collision (only solid platforms block bullets)
+      for (const plat of MAP_PLATFORMS) {
+        if (!plat.isJumpThrough) {
+          if (
+            p.x >= plat.x &&
+            p.x <= plat.x + plat.width &&
+            p.y >= plat.y &&
+            p.y <= plat.y + plat.height
+          ) {
+            this.spawnExplosion(p.x, p.y, 14, '#94a3b8');
+            return false;
+          }
+        }
       }
 
       // Check crate hit
@@ -337,25 +473,30 @@ export class GameEngine {
         ) {
           crate.hp -= 1;
           audioService.playCrateHit();
+          this.spawnExplosion(p.x, p.y, 18, '#d97706');
           if (crate.hp <= 0) {
             crate.broken = true;
-            this.spawnExplosion(crate.x + crate.width / 2, crate.y + crate.height / 2, 40, '#d97706');
+            this.spawnExplosion(crate.x + crate.width / 2, crate.y + crate.height / 2, 50, '#d97706');
           }
           return false;
         }
       }
 
-      // Check player hits
+      // Check player hits (AABB capsule check)
       for (const player of this.players.values()) {
         if (!player.isAlive || player.id === p.ownerId) continue;
 
-        const dist = Math.hypot(player.x - p.x, player.y - p.y);
-        if (dist < 18 + p.radius) {
-          // Hit detected! Friendly fire logic
+        const left = player.x - PLAYER_HALF_WIDTH;
+        const right = player.x + PLAYER_HALF_WIDTH;
+        const top = player.y - PLAYER_HALF_HEIGHT;
+        const bottom = player.y + PLAYER_HALF_HEIGHT;
+
+        if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) {
           const isFriendly = player.team === p.ownerTeam;
           const finalDamage = isFriendly ? Math.round(p.damage * 0.5) : p.damage;
 
           this.damagePlayer(player, finalDamage, p.ownerId, p.weapon);
+          this.spawnExplosion(p.x, p.y, 16, '#ef4444');
           return false;
         }
       }
@@ -363,19 +504,28 @@ export class GameEngine {
       return true;
     });
 
-    // 4. Update Grenades
+    // 4. Update Grenades with Gravity & Bouncing
     this.grenades = this.grenades.filter((g) => {
       g.fuseTime -= dt;
+      g.vy += GRAVITY * 0.85 * dt;
       g.x += g.vx * dt;
       g.y += g.vy * dt;
-      // Rolling friction
-      g.vx *= 0.94;
-      g.vy *= 0.94;
 
-      // Bounce off walls
-      if (this.checkWallCollision(g.x, g.y, g.radius)) {
+      // Platform bounce
+      for (const plat of MAP_PLATFORMS) {
+        if (g.x + g.radius > plat.x && g.x - g.radius < plat.x + plat.width) {
+          if (g.vy >= 0 && g.y + g.radius >= plat.y && g.y - g.vy * dt <= plat.y + 12) {
+            g.y = plat.y - g.radius;
+            g.vy = -g.vy * 0.55;
+            g.vx *= 0.8;
+            break;
+          }
+        }
+      }
+
+      // Boundary bounce
+      if (g.x - g.radius < 65 || g.x + g.radius > MAP_WIDTH - 65) {
         g.vx = -g.vx * 0.6;
-        g.vy = -g.vy * 0.6;
       }
 
       if (g.fuseTime <= 0) {
@@ -387,15 +537,15 @@ export class GameEngine {
 
     // 5. Update Explosions
     this.explosions = this.explosions.filter((exp) => {
-      exp.radius += (exp.maxRadius - exp.radius) * (dt * 12);
-      exp.alpha -= dt * 2.2;
+      exp.radius += (exp.maxRadius - exp.radius) * (dt * 14);
+      exp.alpha -= dt * 2.5;
       return exp.alpha > 0.05;
     });
   }
 
   private detonateGrenade(g: GrenadeEntity) {
     audioService.playExplosion();
-    const blastRadius = 160;
+    const blastRadius = 180;
     this.spawnExplosion(g.x, g.y, blastRadius, '#ef4444');
 
     // Damage crates in blast
@@ -408,7 +558,7 @@ export class GameEngine {
         crate.hp -= 3;
         if (crate.hp <= 0) {
           crate.broken = true;
-          this.spawnExplosion(crateCenterX, crateCenterY, 45, '#d97706');
+          this.spawnExplosion(crateCenterX, crateCenterY, 50, '#d97706');
         }
       }
     });
@@ -419,16 +569,27 @@ export class GameEngine {
       const dist = Math.hypot(player.x - g.x, player.y - g.y);
       if (dist < blastRadius) {
         const falloff = 1 - dist / blastRadius;
-        let baseDamage = Math.round(85 * falloff);
+        let baseDamage = Math.round(90 * falloff);
         if (player.team === g.ownerTeam && player.id !== g.ownerId) {
-          baseDamage = Math.round(baseDamage * 0.5); // friendly fire reduction
+          baseDamage = Math.round(baseDamage * 0.5);
         }
+        // Blast knockback in side-view
+        const angle = Math.atan2(player.y - g.y, player.x - g.x);
+        player.vx += Math.cos(angle) * 550 * falloff;
+        player.vy = -380 * falloff;
+        player.isOnGround = false;
+
         this.damagePlayer(player, baseDamage, g.ownerId, 'grenade');
       }
     });
   }
 
-  private damagePlayer(victim: GamePlayerState, damage: number, attackerId: string, weapon: WeaponType | 'grenade') {
+  private damagePlayer(
+    victim: GamePlayerState,
+    damage: number,
+    attackerId: string,
+    weapon: WeaponType | 'grenade'
+  ) {
     victim.hp -= damage;
     audioService.playPlayerHit();
 
@@ -439,25 +600,21 @@ export class GameEngine {
       victim.respawnTimeRemaining = 2.5;
 
       audioService.playDeath();
-      this.spawnExplosion(victim.x, victim.y, 50, '#94a3b8');
+      this.spawnExplosion(victim.x, victim.y, 60, '#94a3b8');
 
-      // Trigger Algerian Darija character voice line occasionally
       audioService.triggerRandomCharacterVoice();
 
       const attacker = this.players.get(attackerId);
       if (attacker) {
         if (attacker.team === victim.team && attacker.id !== victim.id) {
-          // Team kill penalty
           attacker.score = Math.max(0, attacker.score - 50);
           this.teamScores[attacker.team] = Math.max(0, this.teamScores[attacker.team] - 50);
         } else {
-          // Enemy kill reward
           attacker.kills += 1;
           attacker.score += 100;
           this.teamScores[attacker.team] += 100;
         }
 
-        // Add to kill feed
         this.killFeed = [
           {
             id: `kf_${Date.now()}_${Math.random()}`,
@@ -483,23 +640,20 @@ export class GameEngine {
     player.hp = player.maxHp;
     player.isAlive = true;
     player.respawnTimeRemaining = 0;
+    player.isOnGround = true;
 
     audioService.playRespawn();
-    this.spawnExplosion(spawn.x, spawn.y, 40, '#10b981');
+    this.spawnExplosion(spawn.x, spawn.y, 45, '#10b981');
   }
 
   private getSafeSpawn(team: TeamColor): { x: number; y: number } {
     const baseSpawn = TEAM_SPAWNS[team];
     const candidateSpawns = [baseSpawn, ...NEUTRAL_SPAWNS];
 
-    // Pick spawn with largest distance from active enemies
     let bestSpawn = baseSpawn;
     let maxMinDist = -1;
 
     for (const s of candidateSpawns) {
-      // Verify not inside a wall or crate
-      if (this.checkWallCollision(s.x, s.y, 20)) continue;
-
       let minDistToEnemy = Infinity;
       this.players.forEach((p) => {
         if (p.isAlive && p.team !== team) {
@@ -515,31 +669,24 @@ export class GameEngine {
     }
 
     return {
-      x: bestSpawn.x + (Math.random() * 40 - 20),
-      y: bestSpawn.y + (Math.random() * 40 - 20),
+      x: bestSpawn.x,
+      y: bestSpawn.y,
     };
   }
 
-  private checkWallCollision(x: number, y: number, radius: number): boolean {
-    // Map bounds
-    if (x - radius < 40 || x + radius > MAP_WIDTH - 40 || y - radius < 40 || y + radius > MAP_HEIGHT - 40) {
-      return true;
-    }
-
-    // Static walls
-    for (const wall of MAP_WALLS) {
-      // Find closest point on rectangle to circle center
-      const closestX = Math.max(wall.x, Math.min(x, wall.x + wall.width));
-      const closestY = Math.max(wall.y, Math.min(y, wall.y + wall.height));
-      const distanceX = x - closestX;
-      const distanceY = y - closestY;
-      const distanceSquared = distanceX * distanceX + distanceY * distanceY;
-
-      if (distanceSquared < radius * radius) {
-        return true;
+  private checkSolidCollision(x: number, y: number): boolean {
+    for (const plat of MAP_PLATFORMS) {
+      if (!plat.isJumpThrough) {
+        if (
+          x + PLAYER_HALF_WIDTH > plat.x &&
+          x - PLAYER_HALF_WIDTH < plat.x + plat.width &&
+          y + PLAYER_HALF_HEIGHT > plat.y &&
+          y - PLAYER_HALF_HEIGHT < plat.y + plat.height
+        ) {
+          return true;
+        }
       }
     }
-
     return false;
   }
 
@@ -548,7 +695,7 @@ export class GameEngine {
       id: `exp_${Date.now()}_${Math.random()}`,
       x,
       y,
-      radius: 5,
+      radius: 6,
       maxRadius,
       alpha: 1.0,
       color,

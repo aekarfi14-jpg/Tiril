@@ -1,9 +1,9 @@
 import { TeamColor, CrateEntity } from '../types';
 
-export const MAP_WIDTH = 2400;
-export const MAP_HEIGHT = 1600;
+export const MAP_WIDTH = 2600;
+export const MAP_HEIGHT = 1400;
 
-export interface WallObstacle {
+export interface PlatformObstacle {
   id: string;
   x: number;
   y: number;
@@ -11,6 +11,8 @@ export interface WallObstacle {
   height: number;
   label?: string;
   isMonument?: boolean;
+  isJumpThrough?: boolean; // Can jump through from bottom
+  material?: 'stone' | 'metal' | 'monument' | 'ground';
 }
 
 export interface SpawnPoint {
@@ -19,90 +21,82 @@ export interface SpawnPoint {
   team?: TeamColor;
 }
 
-// Map Static Obstacles (Walls, Pillars, Monument fins)
-export const MAP_WALLS: WallObstacle[] = [
+// 2D Side-View Platforms & Boundaries
+export const MAP_PLATFORMS: PlatformObstacle[] = [
   // Outer Boundaries
-  { id: 'boundary_top', x: 0, y: 0, width: MAP_WIDTH, height: 40 },
-  { id: 'boundary_bottom', x: 0, y: MAP_HEIGHT - 40, width: MAP_WIDTH, height: 40 },
-  { id: 'boundary_left', x: 0, y: 0, width: 40, height: MAP_HEIGHT },
-  { id: 'boundary_right', x: MAP_WIDTH - 40, y: 0, width: 40, height: MAP_HEIGHT },
+  { id: 'boundary_left', x: 0, y: 0, width: 60, height: MAP_HEIGHT, material: 'ground' },
+  { id: 'boundary_right', x: MAP_WIDTH - 60, y: 0, width: 60, height: MAP_HEIGHT, material: 'ground' },
+  { id: 'boundary_ceiling', x: 0, y: 0, width: MAP_WIDTH, height: 40, material: 'metal' },
 
-  // Center: Maqam El Chahid (Martyrs' Memorial) Core Architecture
-  // 3 Iconic Soaring Palm Leaf Pillars (Stylized triangular/block structures)
-  // Fin 1: North-West curved fin
-  { id: 'maqam_fin_north', x: 1160, y: 640, width: 80, height: 120, isMonument: true, label: 'مقام الشهيد' },
-  // Fin 2: South-West fin
-  { id: 'maqam_fin_sw', x: 1040, y: 880, width: 110, height: 70, isMonument: true, label: 'مقام الشهيد' },
-  // Fin 3: South-East fin
-  { id: 'maqam_fin_se', x: 1250, y: 880, width: 110, height: 70, isMonument: true, label: 'مقام الشهيد' },
-  // Center Flame Altar Podium (Circular cover ring modeled as rectangular blocks)
-  { id: 'maqam_center_core', x: 1170, y: 770, width: 60, height: 60, isMonument: true, label: 'شعلة الشهيد' },
+  // Main Solid Ground Promenade (Riadh El Feth / Kasbah pavers)
+  { id: 'ground_floor', x: 60, y: 1250, width: MAP_WIDTH - 120, height: 150, material: 'ground', label: 'الساحة المركزية' },
 
-  // North Sector: Riadh El Feth Promenade
-  { id: 'rf_col_1', x: 600, y: 220, width: 180, height: 35 },
-  { id: 'rf_col_2', x: 900, y: 220, width: 180, height: 35 },
-  { id: 'rf_col_3', x: 1320, y: 220, width: 180, height: 35 },
-  { id: 'rf_col_4', x: 1620, y: 220, width: 180, height: 35 },
-  { id: 'rf_wall_long', x: 800, y: 380, width: 800, height: 30 },
+  // Center: Maqam El Chahid (Martyrs' Memorial) Terraces & Pedestal
+  // Center Flame Altar Podium (Where the eternal flame burns)
+  { id: 'maqam_altar_podium', x: 1040, y: 1080, width: 520, height: 35, isMonument: true, material: 'monument', label: 'مقام الشهيد - شعلة الشهيد' },
+  // Monument Mid Catwalk
+  { id: 'maqam_mid_catwalk', x: 1100, y: 880, width: 400, height: 26, isMonument: true, material: 'monument', isJumpThrough: true },
+  // Monument High Observation Perch
+  { id: 'maqam_high_perch', x: 1180, y: 680, width: 240, height: 24, isMonument: true, material: 'monument', isJumpThrough: true },
+  // Monument Apex Spire Ledge
+  { id: 'maqam_apex_ledge', x: 1220, y: 480, width: 160, height: 22, isMonument: true, material: 'monument', isJumpThrough: true },
 
-  // South Sector: Botanical Gardens (Jardin d'Essai) Stone Benches & Barriers
-  { id: 'je_bench_1', x: 700, y: 1250, width: 220, height: 35 },
-  { id: 'je_bench_2', x: 1050, y: 1250, width: 300, height: 35 },
-  { id: 'je_bench_3', x: 1480, y: 1250, width: 220, height: 35 },
-  { id: 'je_fountain_core', x: 1130, y: 1380, width: 140, height: 70 },
+  // West Flank: Kasbah Architectural Terraces & Stairs
+  { id: 'kasbah_tier_1', x: 180, y: 1140, width: 340, height: 30, material: 'stone', label: 'شرفة القصبة السفلى' },
+  { id: 'kasbah_tier_2', x: 340, y: 1000, width: 280, height: 26, material: 'stone', isJumpThrough: true },
+  { id: 'kasbah_roof_high', x: 140, y: 840, width: 360, height: 28, material: 'stone', isJumpThrough: true, label: 'سطح القصبة العالي' },
+  { id: 'kasbah_sky_bridge', x: 440, y: 720, width: 240, height: 24, material: 'metal', isJumpThrough: true },
 
-  // West Sector: Kasbah Stone Corridors
-  { id: 'kasbah_alley_1', x: 260, y: 400, width: 35, height: 350 },
-  { id: 'kasbah_alley_2', x: 420, y: 550, width: 180, height: 35 },
-  { id: 'kasbah_alley_3', x: 420, y: 800, width: 35, height: 300 },
-  { id: 'kasbah_door_wall', x: 260, y: 1000, width: 250, height: 35 },
+  // East Flank: Algiers Port & Industrial Catwalks
+  { id: 'port_tier_1', x: 2080, y: 1140, width: 360, height: 30, material: 'metal', label: 'أرصفة الميناء' },
+  { id: 'port_tier_2', x: 1980, y: 1000, width: 280, height: 26, material: 'metal', isJumpThrough: true },
+  { id: 'port_crane_gantry', x: 2100, y: 840, width: 360, height: 28, material: 'metal', isJumpThrough: true, label: 'منصة رافعة الميناء' },
+  { id: 'port_sky_bridge', x: 1920, y: 720, width: 240, height: 24, material: 'metal', isJumpThrough: true },
 
-  // East Sector: Port & Warehouse Shipping Enclosures
-  { id: 'port_block_1', x: 1850, y: 450, width: 240, height: 80 },
-  { id: 'port_block_2', x: 1850, y: 700, width: 240, height: 80 },
-  { id: 'port_block_3', x: 1850, y: 950, width: 240, height: 80 },
-  { id: 'port_crane_base', x: 2160, y: 750, width: 90, height: 160 },
+  // Mid-Ground Transition Platforms (Connecting wings to monument)
+  { id: 'mid_wing_west', x: 740, y: 960, width: 240, height: 24, material: 'stone', isJumpThrough: true },
+  { id: 'mid_wing_east', x: 1620, y: 960, width: 240, height: 24, material: 'stone', isJumpThrough: true },
+  { id: 'high_wing_west', x: 820, y: 800, width: 220, height: 22, material: 'metal', isJumpThrough: true },
+  { id: 'high_wing_east', x: 1560, y: 800, width: 220, height: 22, material: 'metal', isJumpThrough: true },
 ];
 
-// Team Base Spawns & Tactical Respawns
+// Team Base Spawns for 2D Side-View
 export const TEAM_SPAWNS: Record<TeamColor, SpawnPoint> = {
-  red: { x: 220, y: 180, team: 'red' }, // Top-Left Red Base
-  green: { x: 2180, y: 180, team: 'green' }, // Top-Right Green Base
-  blue: { x: 220, y: 1420, team: 'blue' }, // Bottom-Left Blue Base
-  yellow: { x: 2180, y: 1420, team: 'yellow' }, // Bottom-Right Yellow Base
+  red: { x: 260, y: 1080, team: 'red' }, // West Low Kasbah
+  green: { x: 2320, y: 1080, team: 'green' }, // East Low Port
+  blue: { x: 280, y: 780, team: 'blue' }, // West High Roof
+  yellow: { x: 2280, y: 780, team: 'yellow' }, // East High Gantry
 };
 
 export const NEUTRAL_SPAWNS: SpawnPoint[] = [
-  { x: 750, y: 600 },
-  { x: 1650, y: 600 },
-  { x: 750, y: 1000 },
-  { x: 1650, y: 1000 },
-  { x: 1200, y: 480 },
-  { x: 1200, y: 1120 },
+  { x: 1200, y: 1020 }, // Center Altar
+  { x: 1300, y: 820 },  // Center Mid Catwalk
+  { x: 800, y: 1180 },  // West Ground
+  { x: 1800, y: 1180 }, // East Ground
+  { x: 840, y: 900 },   // Mid Wing West
+  { x: 1660, y: 900 },  // Mid Wing East
 ];
 
-// Initial Wooden Crates (Pushable & Destructible)
+// Wooden Crates sitting on platforms (Pushable & Destructible)
 export const INITIAL_CRATES: Omit<CrateEntity, 'vx' | 'vy' | 'broken'>[] = [
-  // Center monument cover crates
-  { id: 'crate_c1', x: 1080, y: 720, width: 50, height: 50, hp: 4, maxHp: 4 },
-  { id: 'crate_c2', x: 1270, y: 720, width: 50, height: 50, hp: 4, maxHp: 4 },
-  { id: 'crate_c3', x: 1120, y: 880, width: 50, height: 50, hp: 4, maxHp: 4 },
-  { id: 'crate_c4', x: 1230, y: 880, width: 50, height: 50, hp: 4, maxHp: 4 },
+  // Ground floor crates
+  { id: 'crate_g1', x: 680, y: 1195, width: 55, height: 55, hp: 4, maxHp: 4 },
+  { id: 'crate_g2', x: 740, y: 1195, width: 55, height: 55, hp: 4, maxHp: 4 },
+  { id: 'crate_g3', x: 1820, y: 1195, width: 55, height: 55, hp: 4, maxHp: 4 },
+  { id: 'crate_g4', x: 1880, y: 1195, width: 55, height: 55, hp: 4, maxHp: 4 },
+
+  // Center Memorial podium crates
+  { id: 'crate_c1', x: 1080, y: 1025, width: 55, height: 55, hp: 4, maxHp: 4 },
+  { id: 'crate_c2', x: 1460, y: 1025, width: 55, height: 55, hp: 4, maxHp: 4 },
+  { id: 'crate_c3', x: 1260, y: 825, width: 55, height: 55, hp: 4, maxHp: 4 },
 
   // Kasbah crates
-  { id: 'crate_k1', x: 340, y: 480, width: 48, height: 48, hp: 3, maxHp: 3 },
-  { id: 'crate_k2', x: 340, y: 535, width: 48, height: 48, hp: 3, maxHp: 3 },
-  { id: 'crate_k3', x: 480, y: 920, width: 48, height: 48, hp: 3, maxHp: 3 },
+  { id: 'crate_k1', x: 220, y: 1085, width: 55, height: 55, hp: 3, maxHp: 3 },
+  { id: 'crate_k2', x: 380, y: 945, width: 55, height: 55, hp: 3, maxHp: 3 },
+  { id: 'crate_k3', x: 260, y: 785, width: 55, height: 55, hp: 3, maxHp: 3 },
 
-  // Port crates cluster
-  { id: 'crate_p1', x: 1750, y: 520, width: 55, height: 55, hp: 4, maxHp: 4 },
-  { id: 'crate_p2', x: 1750, y: 580, width: 55, height: 55, hp: 4, maxHp: 4 },
-  { id: 'crate_p3', x: 1750, y: 770, width: 55, height: 55, hp: 4, maxHp: 4 },
-  { id: 'crate_p4', x: 1750, y: 830, width: 55, height: 55, hp: 4, maxHp: 4 },
-
-  // Promenade & Gardens cover
-  { id: 'crate_g1', x: 860, y: 1140, width: 50, height: 50, hp: 3, maxHp: 3 },
-  { id: 'crate_g2', x: 1540, y: 1140, width: 50, height: 50, hp: 3, maxHp: 3 },
-  { id: 'crate_m1', x: 920, y: 440, width: 48, height: 48, hp: 3, maxHp: 3 },
-  { id: 'crate_m2', x: 1480, y: 440, width: 48, height: 48, hp: 3, maxHp: 3 },
+  // Port crates
+  { id: 'crate_p1', x: 2240, y: 1085, width: 55, height: 55, hp: 4, maxHp: 4 },
+  { id: 'crate_p2', x: 2060, y: 945, width: 55, height: 55, hp: 4, maxHp: 4 },
+  { id: 'crate_p3', x: 2260, y: 785, width: 55, height: 55, hp: 4, maxHp: 4 },
 ];

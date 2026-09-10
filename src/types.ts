@@ -95,7 +95,11 @@ export interface GamePlayerState {
   deaths: number;
   score: number;
   isJumping: boolean;
-  jumpHeight: number; // elevation offset
+  jumpHeight: number; // elevation or jump state
+  facingRight: boolean;
+  isOnGround: boolean;
+  walkCycle: number;
+  isShooting: boolean;
   number: number;
 }
 

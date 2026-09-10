@@ -5,6 +5,7 @@ import { DualSimulatorView } from './components/DualSimulatorView';
 import { DiagnosticsModal } from './components/DiagnosticsModal';
 import { AndroidProjectModal } from './components/AndroidProjectModal';
 import { AudioSettingsModal } from './components/AudioSettingsModal';
+import { CharacterAvatar2D } from './components/CharacterAvatar2D';
 import { AppMode } from './types';
 import { Language, translations } from './i18n/translations';
 import {
@@ -188,6 +189,26 @@ export default function App() {
                   ? 'لعبة قتال متعددة اللاعبين في ساحة مقام الشهيد بالعاصمة الجزائرية. خادم تلفاز موحد وهواتف تحكم تعمل بالكامل دون اتصال بالإنترنت عبر شبكة Wi-Fi أو Hotspot المحلية.'
                   : 'Multiplayer combat game set in the Algerian Martyrs\' Memorial arena. Authoritative TV host and responsive phone controllers running fully offline over local Wi-Fi or Hotspot.'}
               </p>
+
+              {/* 2D Full-Body Animated Squad Preview */}
+              <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                <div className="bg-slate-900/80 border border-rose-500/30 rounded-2xl p-2 flex flex-col items-center">
+                  <CharacterAvatar2D team="red" characterId="commando" weapon="rifle" size={72} animate={true} />
+                  <span className="text-[10px] font-bold text-rose-400 font-mono mt-1">{t.teams.red}</span>
+                </div>
+                <div className="bg-slate-900/80 border border-emerald-500/30 rounded-2xl p-2 flex flex-col items-center">
+                  <CharacterAvatar2D team="green" characterId="sniper" weapon="shotgun" size={72} animate={true} />
+                  <span className="text-[10px] font-bold text-emerald-400 font-mono mt-1">{t.teams.green}</span>
+                </div>
+                <div className="bg-slate-900/80 border border-sky-500/30 rounded-2xl p-2 flex flex-col items-center">
+                  <CharacterAvatar2D team="blue" characterId="heavy" weapon="rifle" size={72} animate={true} />
+                  <span className="text-[10px] font-bold text-sky-400 font-mono mt-1">{t.teams.blue}</span>
+                </div>
+                <div className="bg-slate-900/80 border border-amber-500/30 rounded-2xl p-2 flex flex-col items-center">
+                  <CharacterAvatar2D team="yellow" characterId="scout" weapon="shotgun" size={72} animate={true} />
+                  <span className="text-[10px] font-bold text-amber-400 font-mono mt-1">{t.teams.yellow}</span>
+                </div>
+              </div>
             </div>
 
             {/* Mode Selection Cards */}
