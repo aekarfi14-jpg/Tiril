@@ -203,7 +203,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connectClient(hostIp: String, port: Int, playerName: String) {
         clientController?.disconnect()
-و        val client = ClientController(
+         val client = ClientController(
             hostIp = hostIp,
             port = port,
             playerName = playerName,
