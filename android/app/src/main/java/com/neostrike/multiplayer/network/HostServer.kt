@@ -105,7 +105,7 @@ class HostServer(
         } catch (_: Exception) {}
     }
 
-    fun broadcast(message: String) {
+    override fun broadcast(message: String) {
         for ((_, player) in players) {
             try {
                 player.webSocket.send(message)
