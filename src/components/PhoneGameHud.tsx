@@ -3,6 +3,7 @@ import { GamePlayerState, WeaponType, PlayerInput } from '../types';
 import { Language, translations } from '../i18n/translations';
 import { Crosshair, Bomb, ArrowUp, Sliders, RefreshCw, Zap } from 'lucide-react';
 import { audioService } from '../services/audioService';
+import { localLanBus } from '../services/localLanBus';
 import { CharacterAvatar2D } from './CharacterAvatar2D';
 
 interface PhoneGameHudProps {
@@ -121,6 +122,7 @@ export const PhoneGameHud: React.FC<PhoneGameHudProps> = ({
   // Fire Touch & Drag to Aim
   const handleFireTouchStart = (e: React.TouchEvent) => {
     setIsFiring(true);
+    localLanBus.vibrate(25);
     updateFireAim(e.touches[0]);
   };
 
@@ -321,8 +323,12 @@ export const PhoneGameHud: React.FC<PhoneGameHudProps> = ({
               id="hud-jump-btn"
               onClick={() => {
                 setIsJumping(true);
+                localLanBus.vibrate(20);
               }}
-              onTouchStart={() => setIsJumping(true)}
+              onTouchStart={() => {
+                setIsJumping(true);
+                localLanBus.vibrate(20);
+              }}
               className="w-14 h-14 rounded-2xl bg-emerald-600/25 border-2 border-emerald-500 hover:bg-emerald-600/35 text-emerald-300 flex flex-col items-center justify-center font-bold text-xs transition shadow-xl cursor-pointer active:scale-95"
             >
               <ArrowUp className="w-6 h-6 stroke-[2.5]" />

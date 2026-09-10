@@ -66,6 +66,9 @@ dependencies {
     // Local embedded WebSocket server and client (Zero internet / Offline LAN)
     implementation("org.java-websocket:Java-WebSocket:1.5.6")
     
+    // AndroidX WebKit for high-performance virtual asset loading
+    implementation("androidx.webkit:webkit:1.10.0")
+    
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 

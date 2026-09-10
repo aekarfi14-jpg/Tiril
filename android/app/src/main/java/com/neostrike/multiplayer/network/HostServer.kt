@@ -21,6 +21,7 @@ class HostServer(
     private val onTestMessageReceived: (playerLabel: String) -> Unit
 ) : WebSocketServer(InetSocketAddress(port)) {
 
+    var onRawMessageReceived: ((String) -> Unit)? = null
     private val players = ConcurrentHashMap<WebSocket, ConnectedPlayer>()
     private var playerCounter = 0
 
@@ -98,6 +99,17 @@ class HostServer(
         } catch (e: Exception) {
             DiagnosticsLogger.connectionErrors.value = "Bad packet: ${e.message}"
             DiagnosticsLogger.log("MESSAGE PARSE_ERROR: ${e.message}")
+        }
+        try {
+            onRawMessageReceived?.invoke(message)
+        } catch (_: Exception) {}
+    }
+
+    fun broadcast(message: String) {
+        for ((_, player) in players) {
+            try {
+                player.webSocket.send(message)
+            } catch (_: Exception) {}
         }
     }
 

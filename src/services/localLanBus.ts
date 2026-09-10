@@ -29,18 +29,73 @@ class LocalLanBus {
   };
 
   constructor() {
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        this.channel = new BroadcastChannel('neostrike_local_lan');
-        this.channel.onmessage = (event) => {
-          this.handleIncomingMessage(event.data);
-        };
-      } catch (err) {
-        console.warn('BroadcastChannel error, falling back to local memory bus', err);
+    if (typeof window !== 'undefined') {
+      if ('BroadcastChannel' in window) {
+        try {
+          this.channel = new BroadcastChannel('neostrike_local_lan');
+          this.channel.onmessage = (event) => {
+            this.handleIncomingMessage(event.data);
+          };
+        } catch (err) {
+          console.warn('BroadcastChannel error, falling back to local memory bus', err);
+        }
       }
+
+      // Check if running inside native Android APK
+      const bridge = (window as any).AndroidBridge;
+      if (bridge) {
+        try {
+          const nativeIp = bridge.getLocalIp?.();
+          if (nativeIp && nativeIp !== '127.0.0.1') {
+            this.info.localIp = nativeIp;
+          }
+          this.addLog(`Native Android detected. Device IP: ${this.info.localIp}`, 'success');
+        } catch (e) {
+          console.error('Failed reading native IP', e);
+        }
+      }
+
+      // Handler for messages sent from Kotlin/Android WebSocket server or client
+      (window as any).onNativeMessage = (rawJson: string) => {
+        try {
+          const msg = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+          if (msg.type === 'ROOM_DISCOVERED') {
+            this.handleIncomingMessage({
+              type: 'DISCOVERY_BEACON',
+              room: {
+                id: 'room_' + (msg.hostIp || '192.168.1.1'),
+                name: msg.roomName || 'NeoStrike Room',
+                hostIp: msg.hostIp || '192.168.1.1',
+                port: msg.port || 8888,
+                playersCount: 1,
+                maxPlayers: 4,
+                status: 'idle',
+                discoveredAt: Date.now(),
+              },
+            });
+          } else {
+            this.handleIncomingMessage(msg);
+          }
+        } catch (err) {
+          console.error('Error handling onNativeMessage:', err);
+        }
+      };
     }
 
     this.addLog('Network CONNECTED (Local LAN, Offline Mode)', 'info');
+  }
+
+  public vibrate(durationMs = 30) {
+    if (typeof window !== 'undefined') {
+      const bridge = (window as any).AndroidBridge;
+      if (bridge?.vibrate) {
+        bridge.vibrate(durationMs);
+        return;
+      }
+      if ('vibrate' in navigator) {
+        navigator.vibrate(durationMs);
+      }
+    }
   }
 
   private getTimeString(): string {
@@ -104,6 +159,16 @@ class LocalLanBus {
         console.error('Channel postMessage failed', e);
       }
     }
+
+    // Send through Native Android Bridge if present
+    if (typeof window !== 'undefined' && (window as any).AndroidBridge) {
+      try {
+        (window as any).AndroidBridge.sendToNativeBus(JSON.stringify(msg));
+      } catch (e) {
+        console.error('AndroidBridge send failed', e);
+      }
+    }
+
     // Also notify internal frame listeners
     this.handleIncomingMessage(msg);
   }

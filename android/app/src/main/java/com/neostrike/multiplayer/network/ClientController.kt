@@ -15,6 +15,7 @@ class ClientController(
     private val onDisconnected: (String) -> Unit
 ) {
 
+    var onRawMessageReceived: ((String) -> Unit)? = null
     private var client: WebSocketClient? = null
 
     fun connect() {
@@ -58,6 +59,9 @@ class ClientController(
                 } catch (e: Exception) {
                     DiagnosticsLogger.log("CLIENT MESSAGE_ERROR: ${e.message}")
                 }
+                try {
+                    onRawMessageReceived?.invoke(message)
+                } catch (_: Exception) {}
             }
 
             override fun onClose(code: Int, reason: String?, remote: Boolean) {
@@ -96,6 +100,14 @@ class ClientController(
         } catch (e: Exception) {
             DiagnosticsLogger.connectionErrors.value = "Send failed: ${e.message}"
             DiagnosticsLogger.log("SEND_TEST_ERROR: ${e.message}")
+        }
+    }
+
+    fun sendRaw(message: String) {
+        try {
+            client?.send(message)
+        } catch (e: Exception) {
+            DiagnosticsLogger.log("SEND_RAW_ERROR: ${e.message}")
         }
     }
 

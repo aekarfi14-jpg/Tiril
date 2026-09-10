@@ -18,6 +18,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies & build full web game
+        run: |
+          npm ci || npm install
+          npm run build
+          mkdir -p android/app/src/main/assets/web
+          cp -r dist/* android/app/src/main/assets/web/
+
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
