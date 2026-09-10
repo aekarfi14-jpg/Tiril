@@ -1,0 +1,6 @@
+{
+  "name": "NeoStrike Local Multiplayer",
+  "description": "نظام اختبار اتصال Multiplayer محلي لـ NeoStrike بين TV / Host و Phone / Controller باكتشاف تلقائي عبر الشبكة المحلية بدون إنترنت.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
