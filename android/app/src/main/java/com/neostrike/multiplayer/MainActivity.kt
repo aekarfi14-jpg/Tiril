@@ -119,14 +119,14 @@ class MainActivity : ComponentActivity() {
             },
             onStartUdpDiscovery = {
                 udpHelper?.startListening { room ->
-                    val roomJson = JSONObject().apply {
-                        put("type", "ROOM_DISCOVERED")
-                        put("roomName", room.name)
-                        put("hostIp", room.hostIp)
-                        put("port", room.port)
-                        put("discoveryMethod", room.discoveryMethod)
-                    }.toString()
-                    sendToWeb(roomJson)
+        val roomJson = JSONObject().apply {
+    put("type", "ROOM_DISCOVERED")
+    put("roomName", room.serviceName)
+    put("hostIp", room.hostIp)
+    put("port", room.port)
+    put("discoveryMethod", "UDP")
+}.toString()
+        sendToWeb(roomJson)   // ← هذا السطر كان ناقص، رجّعه
                 }
             },
             onStopUdpDiscovery = {
@@ -203,7 +203,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connectClient(hostIp: String, port: Int, playerName: String) {
         clientController?.disconnect()
-        val client = ClientController(
+و        val client = ClientController(
             hostIp = hostIp,
             port = port,
             playerName = playerName,
