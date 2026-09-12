@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
                     udpHelper?.startListening { room ->
                         val roomJson = JSONObject().apply {
                             put("type", "ROOM_DISCOVERED")
-                            put("roomName", room.name)
+                            put("roomName", room.serviceName)
                             put("hostIp", room.hostIp)
                             put("port", room.port)
                             put("discoveryMethod", "UDP_BROADCAST")

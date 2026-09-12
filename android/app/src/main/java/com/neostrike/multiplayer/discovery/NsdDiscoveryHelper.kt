@@ -13,7 +13,9 @@ data class DiscoveredRoom(
     val hostIp: String,
     val port: Int,
     val playersCount: Int = 0
-)
+) {
+    val name: String get() = serviceName
+}
 
 class NsdDiscoveryHelper(private val context: Context) {
 
