@@ -32,7 +32,11 @@ class HostServer(
     }
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake?) {
-        val clientIp = conn.remoteSocketAddress.address.hostAddress ?: "Unknown"
+        val clientIp = try {
+            conn.remoteSocketAddress?.address?.hostAddress ?: "Unknown"
+        } catch (_: Throwable) {
+            "Unknown"
+        }
         DiagnosticsLogger.log("TCP/WS CLIENT_CONNECTING from $clientIp")
     }
 
@@ -55,7 +59,11 @@ class HostServer(
                     playerCounter++
                     val assignedName = json.optString("name", "Player $playerCounter")
                     val playerId = json.optString("id", "p_$playerCounter")
-                    val clientIp = conn.remoteSocketAddress.address.hostAddress ?: "127.0.0.1"
+                    val clientIp = try {
+                        conn.remoteSocketAddress?.address?.hostAddress ?: "127.0.0.1"
+                    } catch (_: Throwable) {
+                        "127.0.0.1"
+                    }
 
                     val player = ConnectedPlayer(
                         id = playerId,

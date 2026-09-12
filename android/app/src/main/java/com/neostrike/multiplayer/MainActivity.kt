@@ -6,12 +6,13 @@ import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.view.View
-import android.view.WindowInsets
-import android.view.WindowInsetsController
+import android.os.VibratorManager
 import android.view.WindowManager
 import android.webkit.*
 import androidx.activity.ComponentActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
 import com.neostrike.multiplayer.debug.DiagnosticsLogger
 import com.neostrike.multiplayer.discovery.NsdDiscoveryHelper
@@ -32,34 +33,58 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Keep screen on during active gaming
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Install safe uncaught exception logger to prevent silent unhandled crashes
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            DiagnosticsLogger.log("FATAL on ${thread.name}: ${throwable.message}")
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
 
-        // Enable immersive full-screen mode
-        enableImmersiveMode()
+        // Keep screen awake during active gaming
+        try {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } catch (_: Throwable) {}
 
-        // Initialize discovery and network diagnostics
-        nsdHelper = NsdDiscoveryHelper(this)
-        udpHelper = UdpDiscoveryHelper()
-        DiagnosticsLogger.refreshNetworkInfo(this)
+        // Initialize discovery and network diagnostics safely
+        try {
+            nsdHelper = NsdDiscoveryHelper(this)
+        } catch (t: Throwable) {
+            DiagnosticsLogger.log("NsdDiscoveryHelper init failed: ${t.message}")
+        }
+        try {
+            udpHelper = UdpDiscoveryHelper(this)
+        } catch (t: Throwable) {
+            DiagnosticsLogger.log("UdpDiscoveryHelper init failed: ${t.message}")
+        }
+        try {
+            DiagnosticsLogger.refreshNetworkInfo(this)
+        } catch (t: Throwable) {
+            DiagnosticsLogger.log("refreshNetworkInfo failed: ${t.message}")
+        }
 
-        // Setup WebView
-        webView = WebView(this).apply {
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                mediaPlaybackRequiresUserGesture = false
-                allowFileAccess = true
-                allowContentAccess = true
-                useWideViewPort = true
-                loadWithOverviewMode = true
-                setSupportZoom(false)
-                builtInZoomControls = false
-                displayZoomControls = false
-                cacheMode = WebSettings.LOAD_DEFAULT
+        // Setup WebView safely
+        try {
+            webView = WebView(this).apply {
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    mediaPlaybackRequiresUserGesture = false
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    allowFileAccessFromFileURLs = true
+                    allowUniversalAccessFromFileURLs = true
+                    useWideViewPort = true
+                    loadWithOverviewMode = true
+                    setSupportZoom(false)
+                    builtInZoomControls = false
+                    displayZoomControls = false
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                }
+                setBackgroundColor(0xFF0F172A.toInt()) // Sleek slate dark background
             }
-            setBackgroundColor(0xFF0F172A.toInt()) // Sleek slate dark background
+        } catch (e: Throwable) {
+            DiagnosticsLogger.log("WebView creation failed: ${e.message}")
+            return
         }
 
         // Setup WebViewAssetLoader for virtual secure origin
@@ -72,7 +97,11 @@ class MainActivity : ComponentActivity() {
                 view: WebView,
                 request: WebResourceRequest
             ): WebResourceResponse? {
-                return assetLoader.shouldInterceptRequest(request.url)
+                return try {
+                    assetLoader.shouldInterceptRequest(request.url)
+                } catch (_: Throwable) {
+                    null
+                }
             }
 
             override fun onReceivedError(
@@ -82,9 +111,11 @@ class MainActivity : ComponentActivity() {
             ) {
                 super.onReceivedError(view, request, error)
                 // Fallback to local asset URL if needed
-                if (request?.isForMainFrame == true && error?.errorCode == ERROR_FILE_NOT_FOUND) {
-                    webView.loadUrl("file:///android_asset/web/index.html")
-                }
+                try {
+                    if (request?.isForMainFrame == true) {
+                        webView.loadUrl("file:///android_asset/web/index.html")
+                    }
+                } catch (_: Throwable) {}
             }
         }
 
@@ -106,31 +137,39 @@ class MainActivity : ComponentActivity() {
             onConnectClient = { hostIp, port, playerName -> connectClient(hostIp, port, playerName) },
             onDisconnectClient = { disconnectClient() },
             onSendBroadcast = { message ->
-                // If Host is running, broadcast to all players
-                hostServer?.broadcast(message)
-                // If Client is connected, send to Host
-                clientController?.sendRaw(message)
+                try {
+                    hostServer?.broadcast(message)
+                    clientController?.sendRaw(message)
+                } catch (_: Throwable) {}
             },
             onStartUdpBroadcast = { roomName, port ->
-                udpHelper?.startBroadcasting(roomName, port)
+                try {
+                    udpHelper?.startBroadcasting(roomName, port)
+                } catch (_: Throwable) {}
             },
             onStopUdpBroadcast = {
-                udpHelper?.stop()
+                try {
+                    udpHelper?.stop()
+                } catch (_: Throwable) {}
             },
             onStartUdpDiscovery = {
-                udpHelper?.startListening { room ->
-        val roomJson = JSONObject().apply {
-    put("type", "ROOM_DISCOVERED")
-    put("roomName", room.serviceName)
-    put("hostIp", room.hostIp)
-    put("port", room.port)
-    put("discoveryMethod", "UDP")
-}.toString()
-        sendToWeb(roomJson)   // ← هذا السطر كان ناقص، رجّعه
-                }
+                try {
+                    udpHelper?.startListening { room ->
+                        val roomJson = JSONObject().apply {
+                            put("type", "ROOM_DISCOVERED")
+                            put("roomName", room.name)
+                            put("hostIp", room.hostIp)
+                            put("port", room.port)
+                            put("discoveryMethod", "UDP_BROADCAST")
+                        }.toString()
+                        sendToWeb(roomJson)
+                    }
+                } catch (_: Throwable) {}
             },
             onStopUdpDiscovery = {
-                udpHelper?.stop()
+                try {
+                    udpHelper?.stop()
+                } catch (_: Throwable) {}
             }
         )
         webView.addJavascriptInterface(bridge, "AndroidBridge")
@@ -138,28 +177,21 @@ class MainActivity : ComponentActivity() {
         // Set as main content view
         setContentView(webView)
 
+        // Enable immersive full-screen mode safely after view is attached
+        enableImmersiveMode()
+
         // Load the full offline NeoStrike game bundle
         webView.loadUrl("https://appassets.androidplatform.net/assets/web/index.html")
     }
 
     private fun enableImmersiveMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.insetsController?.let { controller ->
-                controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                controller.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            )
-        }
+        try {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } catch (_: Throwable) {}
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -170,102 +202,126 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startHostServer(port: Int) {
-        hostServer?.shutdown()
-        val server = HostServer(
-            port = port,
-            onPlayerListChanged = { players ->
-                val names = players.map { it.name }
-                val json = JSONObject().apply {
-                    put("type", "PLAYERS_UPDATE")
-                    put("players", org.json.JSONArray(names))
-                }.toString()
-                sendToWeb(json)
-            },
-            onTestMessageReceived = { label ->
-                val json = JSONObject().apply {
-                    put("type", "TEST_RECEIVED")
-                    put("label", label)
-                }.toString()
-                sendToWeb(json)
+        try {
+            hostServer?.shutdown()
+            val server = HostServer(
+                port = port,
+                onPlayerListChanged = { players ->
+                    val names = players.map { it.name }
+                    val json = JSONObject().apply {
+                        put("type", "PLAYERS_UPDATE")
+                        put("players", org.json.JSONArray(names))
+                    }.toString()
+                    sendToWeb(json)
+                },
+                onTestMessageReceived = { label ->
+                    val json = JSONObject().apply {
+                        put("type", "TEST_RECEIVED")
+                        put("label", label)
+                    }.toString()
+                    sendToWeb(json)
+                }
+            )
+            server.onRawMessageReceived = { rawMsg ->
+                sendToWeb(rawMsg)
             }
-        )
-        server.onRawMessageReceived = { rawMsg ->
-            sendToWeb(rawMsg)
+            server.start()
+            hostServer = server
+        } catch (t: Throwable) {
+            DiagnosticsLogger.log("startHostServer error: ${t.message}")
         }
-        server.start()
-        hostServer = server
     }
 
     private fun stopHostServer() {
-        hostServer?.shutdown()
-        hostServer = null
+        try {
+            hostServer?.shutdown()
+            hostServer = null
+        } catch (_: Throwable) {}
     }
 
     private fun connectClient(hostIp: String, port: Int, playerName: String) {
-        clientController?.disconnect()
-         val client = ClientController(
-            hostIp = hostIp,
-            port = port,
-            playerName = playerName,
-            onConnected = {
-                val json = JSONObject().apply {
-                    put("type", "CLIENT_CONNECTED")
-                    put("hostIp", hostIp)
-                }.toString()
-                sendToWeb(json)
-            },
-            onHostTestReceived = {
-                val json = JSONObject().apply {
-                    put("type", "HOST_TEST")
-                }.toString()
-                sendToWeb(json)
-            },
-            onDisconnected = { reason ->
-                val json = JSONObject().apply {
-                    put("type", "CLIENT_DISCONNECTED")
-                    put("reason", reason)
-                }.toString()
-                sendToWeb(json)
+        try {
+            clientController?.disconnect()
+            val client = ClientController(
+                hostIp = hostIp,
+                port = port,
+                playerName = playerName,
+                onConnected = {
+                    val json = JSONObject().apply {
+                        put("type", "CLIENT_CONNECTED")
+                        put("hostIp", hostIp)
+                    }.toString()
+                    sendToWeb(json)
+                },
+                onHostTestReceived = {
+                    val json = JSONObject().apply {
+                        put("type", "HOST_TEST")
+                    }.toString()
+                    sendToWeb(json)
+                },
+                onDisconnected = { reason ->
+                    val json = JSONObject().apply {
+                        put("type", "CLIENT_DISCONNECTED")
+                        put("reason", reason)
+                    }.toString()
+                    sendToWeb(json)
+                }
+            )
+            client.onRawMessageReceived = { rawMsg ->
+                sendToWeb(rawMsg)
             }
-        )
-        client.onRawMessageReceived = { rawMsg ->
-            sendToWeb(rawMsg)
+            client.connect()
+            clientController = client
+        } catch (t: Throwable) {
+            DiagnosticsLogger.log("connectClient error: ${t.message}")
         }
-        client.connect()
-        clientController = client
     }
 
     private fun disconnectClient() {
-        clientController?.disconnect()
-        clientController = null
+        try {
+            clientController?.disconnect()
+            clientController = null
+        } catch (_: Throwable) {}
     }
 
     fun sendToWeb(message: String) {
         runOnUiThread {
-            val safeStr = JSONObject.quote(message)
-            webView.evaluateJavascript(
-                "if (window.onNativeMessage) { window.onNativeMessage($safeStr); }",
-                null
-            )
+            try {
+                if (!isFinishing && !isDestroyed && ::webView.isInitialized) {
+                    val safeStr = JSONObject.quote(message)
+                    webView.evaluateJavascript(
+                        "if (window.onNativeMessage) { window.onNativeMessage($safeStr); }",
+                        null
+                    )
+                }
+            } catch (_: Throwable) {}
         }
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
+        try {
+            if (::webView.isInitialized && webView.canGoBack()) {
+                webView.goBack()
+            } else {
+                super.onBackPressed()
+            }
+        } catch (_: Throwable) {
             super.onBackPressed()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        nsdHelper?.stop()
-        udpHelper?.stop()
-        hostServer?.shutdown()
-        clientController?.disconnect()
-        webView.destroy()
+        try { nsdHelper?.stop() } catch (_: Throwable) {}
+        try { udpHelper?.stop() } catch (_: Throwable) {}
+        try { hostServer?.shutdown() } catch (_: Throwable) {}
+        try { clientController?.disconnect() } catch (_: Throwable) {}
+        try {
+            if (::webView.isInitialized) {
+                webView.destroy()
+            }
+        } catch (_: Throwable) {}
     }
 }
 
@@ -287,77 +343,85 @@ class AndroidBridge(
 
     @JavascriptInterface
     fun getLocalIp(): String {
-        return DiagnosticsLogger.localIp.value
+        return try {
+            DiagnosticsLogger.localIp.value
+        } catch (_: Throwable) {
+            "127.0.0.1"
+        }
     }
 
     @JavascriptInterface
     fun startHost(port: Int) {
         activity.runOnUiThread {
-            onStartServer(port)
+            try { onStartServer(port) } catch (_: Throwable) {}
         }
     }
 
     @JavascriptInterface
     fun stopHost() {
         activity.runOnUiThread {
-            onStopServer()
+            try { onStopServer() } catch (_: Throwable) {}
         }
     }
 
     @JavascriptInterface
     fun connectClient(hostIp: String, port: Int, playerName: String) {
         activity.runOnUiThread {
-            onConnectClient(hostIp, port, playerName)
+            try { onConnectClient(hostIp, port, playerName) } catch (_: Throwable) {}
         }
     }
 
     @JavascriptInterface
     fun disconnectClient() {
         activity.runOnUiThread {
-            onDisconnectClient()
+            try { onDisconnectClient() } catch (_: Throwable) {}
         }
     }
 
     @JavascriptInterface
     fun sendToNativeBus(message: String) {
-        onSendBroadcast(message)
+        try { onSendBroadcast(message) } catch (_: Throwable) {}
     }
 
     @JavascriptInterface
     fun startBroadcastingRoom(roomName: String, port: Int) {
-        onStartUdpBroadcast(roomName, port)
+        try { onStartUdpBroadcast(roomName, port) } catch (_: Throwable) {}
     }
 
     @JavascriptInterface
     fun stopBroadcastingRoom() {
-        onStopUdpBroadcast()
+        try { onStopUdpBroadcast() } catch (_: Throwable) {}
     }
 
     @JavascriptInterface
     fun startDiscovery() {
-        onStartUdpDiscovery()
+        try { onStartUdpDiscovery() } catch (_: Throwable) {}
     }
 
     @JavascriptInterface
     fun stopDiscovery() {
-        onStopUdpDiscovery()
+        try { onStopUdpDiscovery() } catch (_: Throwable) {}
     }
 
     @JavascriptInterface
     fun vibrate(durationMs: Long) {
         try {
-            val vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val clamped = durationMs.coerceIn(10, 500)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = activity.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vibratorManager?.defaultVibrator?.vibrate(
+                    VibrationEffect.createOneShot(clamped, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
                 vibrator?.vibrate(
-                    VibrationEffect.createOneShot(
-                        durationMs.coerceIn(10, 500),
-                        VibrationEffect.DEFAULT_AMPLITUDE
-                    )
+                    VibrationEffect.createOneShot(clamped, VibrationEffect.DEFAULT_AMPLITUDE)
                 )
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(durationMs.coerceIn(10, 500))
+                val vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                vibrator?.vibrate(clamped)
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 }

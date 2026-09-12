@@ -31,50 +31,84 @@ object DiagnosticsLogger {
     val connectionErrors = mutableStateOf("None")
     val disconnectReason = mutableStateOf("None")
 
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-
-    fun log(event: String) {
-        val time = timeFormat.format(Date())
-        val entry = LogEntry(time, event)
-        logs.add(0, entry)
-        if (logs.size > 200) {
-            logs.removeAt(logs.lastIndex)
+    @Synchronized
+    private fun formatCurrentTime(): String {
+        return try {
+            SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        } catch (_: Throwable) {
+            "00:00:00"
         }
     }
 
+    fun log(event: String) {
+        try {
+            val time = formatCurrentTime()
+            val entry = LogEntry(time, event)
+            synchronized(logs) {
+                logs.add(0, entry)
+                if (logs.size > 200) {
+                    logs.removeAt(logs.lastIndex)
+                }
+            }
+        } catch (_: Throwable) {}
+    }
+
     fun clearLogs() {
-        logs.clear()
-        log("Logs Cleared")
+        try {
+            synchronized(logs) {
+                logs.clear()
+            }
+            log("Logs Cleared")
+        } catch (_: Throwable) {}
     }
 
     fun getFormattedLogs(): String {
-        return logs.joinToString("\n") { "${it.timestamp} ${it.message}" }
+        return try {
+            synchronized(logs) {
+                logs.joinToString("\n") { "${it.timestamp} ${it.message}" }
+            }
+        } catch (_: Throwable) {
+            ""
+        }
     }
 
     fun refreshNetworkInfo(context: Context) {
         try {
             val ip = getLocalIpv4Address()
             localIp.value = ip ?: "127.0.0.1"
-            val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            val isWifiEnabled = wifiManager?.isWifiEnabled == true
+            
+            var isWifiEnabled = false
+            try {
+                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                isWifiEnabled = wifiManager?.isWifiEnabled == true
+            } catch (_: Throwable) {}
+
             wifiStatus.value = if (isWifiEnabled) "Wi-Fi Active / Local LAN" else "Hotspot / Offline LAN"
             log("Network REFRESH: IP=${localIp.value} (${wifiStatus.value})")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             connectionErrors.value = e.localizedMessage ?: "Network query failed"
             log("Network ERROR: ${e.message}")
         }
     }
 
     private fun getLocalIpv4Address(): String? {
-        val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
-        for (intf in interfaces) {
-            if (intf.isLoopback || !intf.isUp) continue
-            for (addr in intf.inetAddresses) {
-                if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                    return addr.hostAddress
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
+            for (intf in interfaces) {
+                try {
+                    if (intf.isLoopback || !intf.isUp) continue
+                    for (addr in intf.inetAddresses) {
+                        if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                            return addr.hostAddress
+                        }
+                    }
+                } catch (_: Throwable) {
+                    continue
                 }
             }
+            null
+        } catch (_: Throwable) {
+            null
         }
-        return null
     }
 }

@@ -17,17 +17,35 @@ data class DiscoveredRoom(
 
 class NsdDiscoveryHelper(private val context: Context) {
 
-    private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    private val nsdManager: NsdManager? = try {
+        context.applicationContext.getSystemService(Context.NSD_SERVICE) as? NsdManager
+    } catch (t: Throwable) {
+        DiagnosticsLogger.log("NSD Init error: ${t.message}")
+        null
+    }
+
     private val serviceType = "_neostrike._tcp."
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     private var isRegistered = false
     private var isDiscovering = false
 
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    @Synchronized
+    private fun getCurrentTime(): String {
+        return try {
+            SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        } catch (_: Throwable) {
+            "00:00:00"
+        }
+    }
 
     // 1. Host registers the room on local network
     fun registerService(port: Int, roomName: String = "NeoStrike Room", onRegistered: (String) -> Unit) {
+        val manager = nsdManager ?: run {
+            DiagnosticsLogger.log("NSD not available on this device")
+            return
+        }
+
         val serviceInfo = NsdServiceInfo().apply {
             this.serviceName = roomName
             this.serviceType = this@NsdDiscoveryHelper.serviceType
@@ -61,9 +79,9 @@ class NsdDiscoveryHelper(private val context: Context) {
         }
 
         try {
-            nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
+            manager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
             DiagnosticsLogger.log("NSD REGISTER_REQUEST sent for $roomName")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             DiagnosticsLogger.connectionErrors.value = e.localizedMessage ?: "NSD Register exception"
             DiagnosticsLogger.log("NSD REGISTER_EXCEPTION: ${e.message}")
         }
@@ -72,6 +90,10 @@ class NsdDiscoveryHelper(private val context: Context) {
     // 2. Controller discovers rooms automatically on local network
     fun startDiscovery(onRoomDiscovered: (DiscoveredRoom) -> Unit) {
         if (isDiscovering) return
+        val manager = nsdManager ?: run {
+            DiagnosticsLogger.log("NSD discovery not supported on this device")
+            return
+        }
 
         discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String) {
@@ -82,7 +104,7 @@ class NsdDiscoveryHelper(private val context: Context) {
 
             override fun onServiceFound(service: NsdServiceInfo) {
                 DiagnosticsLogger.log("NSD SERVICE_FOUND: ${service.serviceName}")
-                if (service.serviceType.contains("neostrike")) {
+                if (service.serviceType?.contains("neostrike") == true) {
                     resolveService(service, onRoomDiscovered)
                 }
             }
@@ -110,54 +132,60 @@ class NsdDiscoveryHelper(private val context: Context) {
         }
 
         try {
-            nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
-        } catch (e: Exception) {
+            manager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        } catch (e: Throwable) {
             DiagnosticsLogger.connectionErrors.value = e.localizedMessage ?: "NSD Discover exception"
             DiagnosticsLogger.log("Discovery EXCEPTION: ${e.message}")
         }
     }
 
     private fun resolveService(service: NsdServiceInfo, onRoomDiscovered: (DiscoveredRoom) -> Unit) {
+        val manager = nsdManager ?: return
         val resolveListener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 DiagnosticsLogger.log("NSD RESOLVE_FAILED for ${serviceInfo.serviceName}: code $errorCode")
             }
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                val host = serviceInfo.host.hostAddress ?: return
-                val port = serviceInfo.port
-                val room = DiscoveredRoom(
-                    serviceName = serviceInfo.serviceName,
-                    hostIp = host,
-                    port = port
-                )
-                DiagnosticsLogger.roomsDiscoveredCount.value = 1
-                DiagnosticsLogger.lastDiscoveryTime.value = timeFormat.format(Date())
-                DiagnosticsLogger.hostIp.value = host
-                DiagnosticsLogger.port.value = port
-                DiagnosticsLogger.log("ROOM FOUND: ${room.serviceName} at $host:$port")
-                onRoomDiscovered(room)
+                try {
+                    val host = serviceInfo.host?.hostAddress ?: return
+                    val port = serviceInfo.port
+                    val room = DiscoveredRoom(
+                        serviceName = serviceInfo.serviceName ?: "NeoStrike Room",
+                        hostIp = host,
+                        port = port
+                    )
+                    DiagnosticsLogger.roomsDiscoveredCount.value = 1
+                    DiagnosticsLogger.lastDiscoveryTime.value = getCurrentTime()
+                    DiagnosticsLogger.hostIp.value = host
+                    DiagnosticsLogger.port.value = port
+                    DiagnosticsLogger.log("ROOM FOUND: ${room.serviceName} at $host:$port")
+                    onRoomDiscovered(room)
+                } catch (t: Throwable) {
+                    DiagnosticsLogger.log("NSD RESOLVE_PARSE_ERROR: ${t.message}")
+                }
             }
         }
 
         try {
-            nsdManager.resolveService(service, resolveListener)
-        } catch (e: Exception) {
+            manager.resolveService(service, resolveListener)
+        } catch (e: Throwable) {
             DiagnosticsLogger.log("NSD RESOLVE_EXCEPTION: ${e.message}")
         }
     }
 
     fun stop() {
+        val manager = nsdManager ?: return
         if (isRegistered && registrationListener != null) {
             try {
-                nsdManager.unregisterService(registrationListener)
-            } catch (_: Exception) {}
+                manager.unregisterService(registrationListener)
+            } catch (_: Throwable) {}
             isRegistered = false
         }
         if (isDiscovering && discoveryListener != null) {
             try {
-                nsdManager.stopServiceDiscovery(discoveryListener)
-            } catch (_: Exception) {}
+                manager.stopServiceDiscovery(discoveryListener)
+            } catch (_: Throwable) {}
             isDiscovering = false
         }
     }
